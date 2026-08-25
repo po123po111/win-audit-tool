@@ -24,7 +24,6 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    win_private_assemblies=True,
     cipher=block_cipher,
     noarchive=False,
 )
@@ -42,11 +41,6 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,  # GUI 程序，不显示控制台
-    disable_windowed_traceback=False,
-    argv_emulation=True,
-    target_arch='x64',
-    codesign_identity=None,
-    entitlements_file=None,
 )
 
 coll = COLLECT(
