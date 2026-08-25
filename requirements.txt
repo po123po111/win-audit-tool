@@ -1,0 +1,12 @@
+# Core
+paramiko>=3.0.0
+PyYAML>=6.0
+
+# GUI
+dearpygui>=1.100.0
+
+# HTTP (for report template)
+jinja2>=3.0.0
+
+# Build
+pyinstaller>=6.0.0
