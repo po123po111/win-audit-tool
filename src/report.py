@@ -4,230 +4,318 @@ HTML 报告生成器
 """
 
 from datetime import datetime
-from pathlib import Path
 
 
 def safe(v, default="未知"):
-    """None 安全转字符串"""
     return v if v else default
 
 
-def section_basic(data, ip):
-    """基本信息章节"""
-    d = data
-    mem_pct = 0
-    if d.get("mem_total_mb") and d.get("mem_used_mb"):
-        mem_pct = int(d["mem_used_mb"] * 100 / d["mem_total_mb"])
+# =============================================================================
+# 各章节渲染函数
+# =============================================================================
 
-    warn_blocks = ""
-    if mem_pct >= 85:
-        warn_blocks += '<p class="crit">&#128293; 内存使用率 {}%（严重）</p>'.format(mem_pct)
-    elif mem_pct >= 70:
-        warn_blocks += '<p class="warn">&#9888; 内存使用率 {}%（偏高）</p>'.format(mem_pct)
+def section_basic(data, ip):
+    d = data
+    mem_pct = d.get("mem_pct", 0)
+    load_warns = d.get("cpu_warnings", [])
+    mem_warns = d.get("mem_warnings", [])
+
+    warns = ""
+    for w in load_warns + mem_warns:
+        cls = "crit" if "CRIT" in w else "warn"
+        warns += '<p class="{cls}">{w}</p>'.format(cls=cls, w=w)
 
     return """
 <div class="section">
   <h2>一、系统基本信息</h2>
   <table>
     <tr><th>项目</th><th>值</th></tr>
-    <tr><td>主机名</td><td>{}</td></tr>
-    <tr><td>本机IP</td><td>{}</td></tr>
-    <tr><td>操作系统</td><td>{}</td></tr>
-    <tr><td>内核版本</td><td>{}</td></tr>
-    <tr><td>架构</td><td>{}</td></tr>
-    <tr><td>运行时间</td><td>{}</td></tr>
-    <tr><td>负载</td><td>{}</td></tr>
-    <tr><td>启动时间</td><td>{}</td></tr>
+    <tr><td>主机名</td><td>{hostname}</td></tr>
+    <tr><td>本机IP</td><td>{local_ip}</td></tr>
+    <tr><td>操作系统</td><td>{os_name}</td></tr>
+    <tr><td>内核版本</td><td>{kernel}</td></tr>
+    <tr><td>架构</td><td>{arch}</td></tr>
+    <tr><td>运行时间</td><td>{uptime}</td></tr>
+    <tr><td>负载</td><td>{load_avg}</td></tr>
+    <tr><td>启动时间</td><td>{boot_time}</td></tr>
   </table>
-  {}
+  {warns}
   <h3>网络信息</h3>
-  <pre class="code">{}</pre>
+  <pre class="code">{network_raw}</pre>
 </div>""".format(
-    safe(d.get('hostname')),
-    safe(d.get('local_ip', ip)),
-    safe(d.get('os_name')),
-    safe(d.get('kernel')),
-    safe(d.get('arch')),
-    safe(d.get('uptime')),
-    safe(d.get('load_avg')),
-    safe(d.get('boot_time')),
-    warn_blocks,
-    safe(d.get('network_raw')),
+    hostname=safe(d.get("hostname")),
+    local_ip=safe(d.get("local_ip", ip)),
+    os_name=safe(d.get("os_name")),
+    kernel=safe(d.get("kernel")),
+    arch=safe(d.get("arch")),
+    uptime=safe(d.get("uptime")),
+    load_avg=safe(d.get("load_avg")),
+    boot_time=safe(d.get("boot_time")),
+    warns=safe(warns, ""),
+    network_raw=safe(d.get("network_raw")),
 )
 
 
 def section_cpu(data):
-    """CPU 章节"""
     d = data
-    cpu_lines = safe(d.get('cpu_raw', ''))
+    cpu_warns = d.get("cpu_warnings", [])
+    warns = ""
+    for w in cpu_warns:
+        cls = "crit" if "CRIT" in w else "warn"
+        warns += '<p class="{cls}">{w}</p>'.format(cls=cls, w=w)
+
+    sockets = safe(d.get("cpu_sockets", "1"))
+    cores_per = safe(d.get("cpu_cores_per_socket", ""))
+    cpu_detail = "路数/每路核数: {s}/{c}".format(s=sockets, c=cores_per) if cores_per else ""
+
     return """
 <div class="section">
   <h2>二、CPU 资源</h2>
+  {warns}
   <table>
     <tr><th>项目</th><th>值</th></tr>
-    <tr><td>逻辑核数</td><td>{}</td></tr>
+    <tr><td>型号</td><td>{model}</td></tr>
+    <tr><td>路数/每路核数/逻辑核</td><td>{sockets} / {cores_per} / {cores}</td></tr>
   </table>
-  <h3>CPU 详情</h3>
-  <pre class="code">{}</pre>
-  <h3>实时 CPU 使用率</h3>
-  <pre class="code">{}</pre>
+  <h3>实时 CPU</h3>
+  <pre class="code">{usage}</pre>
 </div>""".format(
-    safe(d.get('cpu_cores')),
-    cpu_lines,
-    safe(d.get('cpu_usage')),
+    warns=safe(warns, ""),
+    model=safe(d.get("cpu_model")),
+    sockets=safe(d.get("cpu_sockets", "1")),
+    cores_per=safe(d.get("cpu_cores_per_socket", "")),
+    cores=safe(d.get("cpu_cores")),
+    usage=safe(d.get("cpu_usage_raw")),
 )
 
 
 def section_mem(data):
-    """内存章节"""
     d = data
-    mem_total = d.get('mem_total_mb', 0)
-    mem_used = d.get('mem_used_mb', 0)
-    mem_pct = int(mem_used * 100 / mem_total) if mem_total else 0
+    mem_warns = d.get("mem_warnings", [])
+    swap_warns = d.get("swap_warnings", [])
 
-    warn = ""
-    if mem_pct >= 85:
-        warn = '<p class="crit">&#128293; 内存使用率 {}%（严重）</p>'.format(mem_pct)
-    elif mem_pct >= 70:
-        warn = '<p class="warn">&#9888; 内存使用率 {}%</p>'.format(mem_pct)
+    warns = ""
+    for w in mem_warns + swap_warns:
+        cls = "crit" if "CRIT" in w else "warn"
+        warns += '<p class="{cls}">{w}</p>'.format(cls=cls, w=w)
+
+    mem_pct = d.get("mem_pct", 0)
+    mem_cls = "crit" if mem_pct >= 85 else "warn" if mem_pct >= 70 else "ok"
 
     return """
 <div class="section">
   <h2>三、内存资源</h2>
-  {}
-  <pre class="code">{}</pre>
-</div>""".format(warn, safe(d.get('mem_raw')))
+  {warns}
+  <table>
+    <tr><th>项目</th><th>值</th></tr>
+    <tr><td>内存使用率</td><td class="{cls}">{pct}%</td></tr>
+    <tr><td>已用/总量</td><td>{used}M / {total}M</td></tr>
+    <tr><td>Swap 已用/总量</td><td>{swap_used}M / {swap_total}M</td></tr>
+  </table>
+  <h3>内存 TOP 10 进程</h3>
+  <pre class="code">{mem_top}</pre>
+  <h3>CPU TOP 10 进程</h3>
+  <pre class="code">{cpu_top}</pre>
+</div>""".format(
+    warns=safe(warns, ""),
+    cls=mem_cls,
+    pct=mem_pct,
+    used=d.get("mem_used_mb", 0),
+    total=d.get("mem_total_mb", 0),
+    swap_used=d.get("swap_used_mb", 0),
+    swap_total=d.get("swap_total_mb", 0),
+    mem_top=safe(d.get("mem_top")),
+    cpu_top=safe(d.get("cpu_top")),
+)
 
 
 def section_disk(data):
-    """磁盘章节"""
     d = data
+    warns = ""
+    for w in d.get("disk_warnings", []):
+        cls = "crit" if "CRIT" in w else "warn"
+        warns += '<p class="{cls}">{w}</p>'.format(cls=cls, w=w)
+
     return """
 <div class="section">
   <h2>四、磁盘与存储</h2>
+  {warns}
   <h3>磁盘设备</h3>
-  <pre class="code">{}</pre>
+  <pre class="code">{devices}</pre>
   <h3>分区使用情况</h3>
-  <pre class="code">{}</pre>
+  <pre class="code">{raw}</pre>
+  <h3>IOSTAT</h3>
+  <pre class="code">{iostat}</pre>
 </div>""".format(
-    safe(d.get('disk_devices')),
-    safe(d.get('disk_raw')),
+    warns=safe(warns, ""),
+    devices=safe(d.get("disk_devices")),
+    raw=safe(d.get("disk_raw")),
+    iostat=safe(d.get("iostat")),
 )
 
 
 def section_network(data):
-    """网络章节"""
     d = data
+    conn = d.get("conn_stats", {})
+
+    conn_rows = ""
+    if conn:
+        conn_rows = """
+  <table>
+    <tr><th>状态</th><th>数量</th></tr>
+    <tr><td>总连接数</td><td>{total}</td></tr>
+    <tr><td>ESTABLISHED</td><td>{established}</td></tr>
+    <tr><td>SYN-WAIT</td><td>{syn_wait}</td></tr>
+    <tr><td>TIME-WAIT</td><td>{time_wait}</td></tr>
+    <tr><td>UDP</td><td>{udp}</td></tr>
+  </table>""".format(
+            total=safe(conn.get("total")),
+            established=safe(conn.get("established")),
+            syn_wait=safe(conn.get("syn_wait")),
+            time_wait=safe(conn.get("time_wait")),
+            udp=safe(conn.get("udp")),
+        )
+
     return """
 <div class="section">
-  <h2>五、网络配置</h2>
-  <h3>默认路由</h3>
-  <pre class="code">{}</pre>
-  <h3>DNS</h3>
-  <pre class="code">{}</pre>
+  <h2>五、网络状态</h2>
+  {conn_rows}
   <h3>监听端口 TOP30</h3>
-  <pre class="code">{}</pre>
+  <pre class="code">{listen}</pre>
 </div>""".format(
-    safe(d.get('default_route')),
-    safe(d.get('dns_servers')),
-    safe(d.get('listen_ports')),
+    conn_rows=safe(conn_rows, ""),
+    listen=safe(d.get("listen_ports_raw")),
 )
 
 
-def section_docker(data):
-    """Docker 章节"""
+def section_apps(data):
+    """六、应用业务清单"""
     d = data
-    if not d.get('docker_installed'):
+    apps = d.get("apps", [])
+
+    rows = ""
+    for app in apps:
+        ports_str = ", ".join(app.get("ports", []))
+        procs = app.get("procs", [])
+        proc_str = ", ".join(["{}/{}".format(pid, pn) for pid, pn in procs[:3]]) or "-"
+        rows += """
+    <tr>
+      <td>{name}</td>
+      <td>{app_type}</td>
+      <td>{ports}</td>
+      <td>{procs}</td>
+    </tr>""".format(
+            name=safe(app.get("app_name", "")),
+            app_type=safe(app.get("app_type", "")),
+            ports=ports_str,
+            procs=proc_str,
+        )
+
+    if not rows:
+        rows = '<tr><td colspan="4" style="text-align:center;color:#9ca3af">无检测到应用</td></tr>'
+
+    return """
+<div class="section">
+  <h2>六、应用业务清单</h2>
+  <table>
+    <tr><th>应用名</th><th>类型</th><th>端口</th><th>PID/进程名</th></tr>
+    {rows}
+  </table>
+</div>""".format(rows=rows)
+
+
+def section_docker(data):
+    d = data
+    if not d.get("docker_installed"):
         return """
 <div class="section">
-  <h2>六、Docker / 容器</h2>
+  <h2>七、Docker / 容器</h2>
   <p class="warn">&#9888; Docker 未安装</p>
 </div>"""
 
-    containers = d.get('docker_containers') or []
-    perm = d.get('docker_has_perm', False)
-    perm_warn = '<p class="warn">&#9888; Docker 已安装但当前用户无权限访问 daemon</p>' if not perm else ''
+    containers = d.get("docker_containers") or []
+    perm = d.get("docker_has_perm", False)
+    perm_warn = '<p class="warn">&#9888; Docker 已安装但当前用户无权限访问 daemon</p>' if not perm else ""
 
     rows = ""
     for c in containers[:20]:
-        rows += "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>".format(
-            safe(c.get('name')),
-            safe(c.get('image')),
-            safe(c.get('ports')),
-            safe(c.get('status')),
+        rows += """<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>""".format(
+            safe(c.get("name")),
+            safe(c.get("image")),
+            safe(c.get("ports")),
+            safe(c.get("status")),
         )
-
     if not rows:
         rows = '<tr><td colspan="4" style="text-align:center;color:#9ca3af">无运行中容器</td></tr>'
 
     return """
 <div class="section">
-  <h2>六、Docker / 容器</h2>
+  <h2>七、Docker / 容器</h2>
   <table>
     <tr><th>版本</th><th>权限</th></tr>
-    <tr><td>{}</td><td>{}</td></tr>
+    <tr><td>{version}</td><td>{perm}</td></tr>
   </table>
-  {}
+  {perm_warn}
   <h3>运行中容器</h3>
   <table>
     <tr><th>名称</th><th>镜像</th><th>端口</th><th>状态</th></tr>
-    {}
+    {rows}
   </table>
   <h3>本地镜像</h3>
-  <pre class="code">{}</pre>
+  <pre class="code">{images}</pre>
 </div>""".format(
-    safe(d.get('docker_version')),
-    '&#9989; 正常' if perm else '&#9888; 无权限',
-    perm_warn,
-    rows,
-    safe(d.get('docker_images')),
-)
-
-
-def section_process(data):
-    """进程章节"""
-    return """
-<div class="section">
-  <h2>七、进程 TOP</h2>
-  <h3>CPU TOP</h3>
-  <pre class="code">{}</pre>
-  <h3>内存 TOP</h3>
-  <pre class="code">{}</pre>
-</div>""".format(
-    safe(data.get('top_cpu')),
-    safe(data.get('top_mem')),
-)
-
-
-def section_user(data):
-    """用户章节"""
-    d = data
-    return """
-<div class="section">
-  <h2>八、用户与安全</h2>
-  <h3>在线用户</h3>
-  <pre class="code">{}</pre>
-  <h3>SSH 配置摘要</h3>
-  <pre class="code">{}</pre>
-</div>""".format(
-    safe(d.get('online_users')),
-    safe(d.get('ssh_config')),
+    version=safe(d.get("docker_version")),
+    perm="&#9989; 正常" if perm else "&#9888; 无权限",
+    perm_warn=perm_warn,
+    rows=rows,
+    images=safe(d.get("docker_images")),
 )
 
 
 def section_cron(data):
-    """定时任务章节"""
+    d = data
     return """
 <div class="section">
-  <h2>九、定时任务</h2>
-  <pre class="code">{}</pre>
-</div>""".format(safe(data.get('cron')))
+  <h2>八、定时任务</h2>
+  <h3>当前用户 Crontab</h3>
+  <pre class="code">{cron}</pre>
+  <h3>Root Crontab</h3>
+  <pre class="code">{cron_root}</pre>
+</div>""".format(
+    cron=safe(d.get("cron")),
+    cron_root=safe(d.get("cron_root")),
+)
+
+
+def section_user(data):
+    d = data
+    return """
+<div class="section">
+  <h2>九、用户与安全</h2>
+  <h3>在线用户</h3>
+  <pre class="code">{online}</pre>
+  <h3>SELinux 状态</h3>
+  <pre class="code">{selinux}</pre>
+  <h3>SSH 配置摘要</h3>
+  <pre class="code">{ssh_config}</pre>
+</div>""".format(
+    online=safe(d.get("online_users")),
+    selinux=safe(d.get("selinux")),
+    ssh_config=safe(d.get("ssh_config")),
+)
 
 
 def section_gpu(data):
-    """GPU 章节"""
     d = data
-    if not d.get('gpu_nvidia'):
+    if not d.get("gpu_nvidia"):
+        gpu_vendor = d.get("gpu_vendor", "")
+        gpu_model = d.get("gpu_model", "")
+        if gpu_vendor or gpu_model:
+            return """
+<div class="section">
+  <h2>十、GPU 配置</h2>
+  <p class="warn">&#9888; 未检测到 NVIDIA 驱动，但检测到：{vendor} {model}</p>
+</div>""".format(vendor=gpu_vendor, model=gpu_model)
         return """
 <div class="section">
   <h2>十、GPU 配置</h2>
@@ -237,9 +325,61 @@ def section_gpu(data):
     return """
 <div class="section">
   <h2>十、GPU 配置</h2>
-  <pre class="code">{}</pre>
-</div>""".format(safe(d.get('gpu_info')))
+  <table>
+    <tr><th>项目</th><th>值</th></tr>
+    <tr><td>GPU 数量</td><td>{count} 张</td></tr>
+    <tr><td>GPU 型号</td><td>{model}</td></tr>
+    <tr><td>显存总容量</td><td>{mem}</td></tr>
+  </table>
+  <h3>GPU 详细信息</h3>
+  <pre class="code">{info}</pre>
+</div>""".format(
+    count=safe(d.get("gpu_count", "0")),
+    model=safe(d.get("gpu_model")),
+    mem=safe(d.get("gpu_mem")),
+    info=safe(d.get("gpu_info")),
+)
 
+
+def section_summary(data):
+    """十一、问题汇总"""
+    warn_count = data.get("_warn_count", 0)
+    crit_count = data.get("_crit_count", 0)
+    all_warns = data.get("_all_warnings", [])
+
+    items = ""
+    for w in all_warns:
+        cls = "crit" if "CRIT" in w else "warn"
+        items += '<p class="{cls}">{w}</p>'.format(cls=cls, w=w)
+
+    status = "&#9989; 未发现明显问题" if warn_count == 0 and crit_count == 0 else "&#9888; 存在需要关注的问题"
+
+    return """
+<div class="section">
+  <h2>十一、问题汇总</h2>
+  <div class="summary-cards">
+    <div class="card">
+      <div class="label">告警数</div>
+      <div class="value warn">{warn}</div>
+    </div>
+    <div class="card">
+      <div class="label">危险数</div>
+      <div class="value crit">{crit}</div>
+    </div>
+  </div>
+  <p>{status}</p>
+  {items}
+</div>""".format(
+    warn=warn_count,
+    crit=crit_count,
+    status=status,
+    items=safe(items, ""),
+)
+
+
+# =============================================================================
+# HTML 模板
+# =============================================================================
 
 REPORT_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -315,11 +455,12 @@ p.crit {{ background: #fee2e2; color: #991b1b; padding: 10px 15px; border-radius
 {section_mem}
 {section_disk}
 {section_network}
+{section_apps}
 {section_docker}
-{section_process}
-{section_user}
 {section_cron}
+{section_user}
 {section_gpu}
+{section_summary}
 
 <div class="footer">
   服务器清点报告 &middot; WinAuditTool &middot; 生成于 {gen_time}
@@ -330,20 +471,26 @@ p.crit {{ background: #fee2e2; color: #991b1b; padding: 10px 15px; border-radius
 """
 
 
+# =============================================================================
+# 入口函数
+# =============================================================================
+
 def generate_report(result, output_path: str = None) -> str:
     """
-    将采集结果渲染为 HTML 报告
+    将 AuditResult 渲染为 HTML 报告
     """
+    from pathlib import Path
+
     d = result.data if result.data else {}
     ip = result.ip
     hostname = result.hostname
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    mem_pct = 0
-    if d.get('mem_total_mb') and d.get('mem_used_mb'):
-        mem_pct = int(d['mem_used_mb'] * 100 / d['mem_total_mb'])
-
-    mem_cls = 'crit' if mem_pct >= 85 else 'warn' if mem_pct >= 70 else 'ok'
+    # 顶部摘要卡片
+    mem_pct = d.get("mem_pct", 0)
+    mem_cls = "crit" if mem_pct >= 85 else "warn" if mem_pct >= 70 else "ok"
+    warn_cnt = d.get("_warn_count", 0)
+    crit_cnt = d.get("_crit_count", 0)
 
     cards = """
   <div class="summary-cards">
@@ -357,23 +504,33 @@ def generate_report(result, output_path: str = None) -> str:
     </div>
     <div class="card">
       <div class="label">内存使用率</div>
-      <div class="value {mem_cls}">{mem_pct}%</div>
+      <div class="value {cls}">{pct}%</div>
     </div>
     <div class="card">
       <div class="label">Docker</div>
-      <div class="value" style="font-size:18px">{docker_status}</div>
+      <div class="value" style="font-size:18px">{docker}</div>
     </div>
     <div class="card">
       <div class="label">GPU</div>
-      <div class="value" style="font-size:18px">{gpu_status}</div>
+      <div class="value" style="font-size:18px">{gpu}</div>
+    </div>
+    <div class="card warn">
+      <div class="label">告警数</div>
+      <div class="value">{warn}</div>
+    </div>
+    <div class="card crit">
+      <div class="label">危险数</div>
+      <div class="value">{crit}</div>
     </div>
   </div>""".format(
         hostname=safe(hostname),
         ip=safe(ip),
-        mem_pct=mem_pct,
-        mem_cls=mem_cls,
-        docker_status='&#9989; 已安装' if d.get('docker_installed') else '&#10060; 未安装',
-        gpu_status='&#9989; NVIDIA' if d.get('gpu_nvidia') else '&#10060; 无',
+        cls=mem_cls,
+        pct=mem_pct,
+        docker='&#9989; 已安装' if d.get('docker_installed') else '&#10060; 未安装',
+        gpu='&#9989; NVIDIA' if d.get('gpu_nvidia') else '&#10060; 无',
+        warn=warn_cnt,
+        crit=crit_cnt,
     )
 
     header = """
@@ -393,11 +550,12 @@ def generate_report(result, output_path: str = None) -> str:
         section_mem=section_mem(d),
         section_disk=section_disk(d),
         section_network=section_network(d),
+        section_apps=section_apps(d),
         section_docker=section_docker(d),
-        section_process=section_process(d),
-        section_user=section_user(d),
         section_cron=section_cron(d),
+        section_user=section_user(d),
         section_gpu=section_gpu(d),
+        section_summary=section_summary(d),
         gen_time=now,
     )
 
