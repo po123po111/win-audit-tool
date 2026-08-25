@@ -195,7 +195,8 @@ with dpg.window(tag="main_window", label="WinAuditTool"):
     dpg.add_spacer(height=5)
 
     with dpg.table(tag="server_list_table", header_row=True, row_background=True,
-                   borders_innerV=True, borders_outer=True):
+                   borders_innerH=True, borders_innerV=True,
+                   borders_outerH=True, borders_outerV=True):
         dpg.add_table_column(label="名称")
         dpg.add_table_column(label="IP")
         dpg.add_table_column(label="端口")
